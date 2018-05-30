@@ -398,20 +398,24 @@ func (s *SqlPostStore) GetEtag(channelId string, allowFromCache bool) store.Stor
 	})
 }
 
-func (s *SqlPostStore) Delete(postId string, time int64) store.StoreChannel {
-
-	deletingUserID := "abadsfjkl44" // TODO: Get this as a parameter to function
-
-	query := "UPDATE Posts SET DeleteAt = :DeleteAt, UpdateAt = :UpdateAt, Props = CAST(JSON_MERGE(CAST(Props AS JSON), JSON_OBJECT('deleteBy', :DeleteByID)) AS CHAR) WHERE Id = :Id OR RootId = :RootId"
-
-	if s.DriverName() == model.DATABASE_DRIVER_POSTGRES {
-		query = ""
-	}
-
+func (s *SqlPostStore) Delete(postId string, time int64, deletingUserID string) store.StoreChannel {
 	return store.Do(func(result *store.StoreResult) {
-		_, err := s.GetMaster().Exec(query, map[string]interface{}{"DeleteAt": time, "UpdateAt": time, "Id": postId, "RootId": postId, "DeleteByID": deletingUserID})
+
+		appErr := func(errMsg string) *model.AppError {
+			return model.NewAppError("SqlPostStore.Delete", "store.sql_post.delete.app_error", nil, "id="+postId+", err="+errMsg, http.StatusInternalServerError)
+		}
+
+		var post model.Post
+		err := s.GetReplica().SelectOne(&post, "SELECT * FROM Posts WHERE Id = :Id AND DeleteAt = 0", map[string]interface{}{"Id": postId})
 		if err != nil {
-			result.Err = model.NewAppError("SqlPostStore.Delete", "store.sql_post.delete.app_error", nil, "id="+postId+", err="+err.Error(), http.StatusInternalServerError)
+			result.Err = appErr(err.Error())
+		}
+
+		post.Props["deleteBy"] = deletingUserID
+
+		_, err = s.GetMaster().Exec("UPDATE Posts SET DeleteAt = :DeleteAt, UpdateAt = :UpdateAt, Props = :Props WHERE Id = :Id OR RootId = :RootId", map[string]interface{}{"DeleteAt": time, "UpdateAt": time, "Id": postId, "RootId": postId, "Props": model.StringInterfaceToJson(post.Props)})
+		if err != nil {
+			result.Err = appErr(err.Error())
 		}
 	})
 }
