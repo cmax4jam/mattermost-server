@@ -399,8 +399,17 @@ func (s *SqlPostStore) GetEtag(channelId string, allowFromCache bool) store.Stor
 }
 
 func (s *SqlPostStore) Delete(postId string, time int64) store.StoreChannel {
+
+	deletingUserID := "abadsfjkl44" // TODO: Get this as a parameter to function
+
+	query := "UPDATE Posts SET DeleteAt = :DeleteAt, UpdateAt = :UpdateAt, Props = CAST(JSON_MERGE(CAST(Props AS JSON), JSON_OBJECT('deleteBy', :DeleteByID)) AS CHAR) WHERE Id = :Id OR RootId = :RootId"
+
+	if s.DriverName() == model.DATABASE_DRIVER_POSTGRES {
+		query = ""
+	}
+
 	return store.Do(func(result *store.StoreResult) {
-		_, err := s.GetMaster().Exec("Update Posts SET DeleteAt = :DeleteAt, UpdateAt = :UpdateAt WHERE Id = :Id OR RootId = :RootId", map[string]interface{}{"DeleteAt": time, "UpdateAt": time, "Id": postId, "RootId": postId})
+		_, err := s.GetMaster().Exec(query, map[string]interface{}{"DeleteAt": time, "UpdateAt": time, "Id": postId, "RootId": postId, "DeleteByID": deletingUserID})
 		if err != nil {
 			result.Err = model.NewAppError("SqlPostStore.Delete", "store.sql_post.delete.app_error", nil, "id="+postId+", err="+err.Error(), http.StatusInternalServerError)
 		}
